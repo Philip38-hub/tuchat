@@ -2,7 +2,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
-import 'views/biometric/biometric_auth_wrapper.dart';
+import 'providers/auth_provider.dart';
+import 'screens/biometric/biometric_auth_wrapper.dart';
+import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
 
 Future<void> main() async {
@@ -12,8 +14,15 @@ Future<void> main() async {
   );
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AuthService(),
+    MultiProvider(
+      providers: [
+        Provider(create: (_) => AuthService()),
+        ChangeNotifierProxyProvider<AuthService, AuthProvider>(
+          create: (context) => AuthProvider(context.read<AuthService>()),
+          update: (context, authService, previous) =>
+              previous ?? AuthProvider(authService),
+        ),
+      ],
       child: const TuChatApp(),
     ),
   );
@@ -30,54 +39,17 @@ class TuChatApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: BiometricAuthWrapper(
-        isAuthenticated: false,
-        onAuthenticationSuccess: () {
-          // This will be handled by the main app logic
-        },
-        onAuthenticationFailure: () {
-          // This will be handled by the main app logic
+      home: Consumer<AuthProvider>(
+        builder: (context, authProvider, child) {
+          return BiometricAuthWrapper(
+            isAuthenticated: authProvider.isBiometricAuthenticated,
+            onAuthenticationSuccess: authProvider.markBiometricAuthenticated,
+            onAuthenticationFailure:
+                authProvider.resetBiometricAuthentication,
+            child: child!,
+          );
         },
         child: const HomeScreen(),
-      ),
-    );
-  }
-}
-
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('TuChat'),
-      ),
-      body: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.chat,
-              size: 100,
-              color: Colors.blue,
-            ),
-            SizedBox(height: 20),
-            Text(
-              'Welcome to TuChat!',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Your secure messaging app',
-              style: TextStyle(fontSize: 16),
-            ),
-          ],
-        ),
       ),
     );
   }

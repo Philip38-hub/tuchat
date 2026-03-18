@@ -1,5 +1,4 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
@@ -7,7 +6,7 @@ import 'package:local_auth_darwin/local_auth_darwin.dart';
 import 'package:tuchat/models/user.dart';
 import 'base_service.dart';
 
-class AuthService extends BaseService with ChangeNotifier {
+class AuthService extends BaseService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();

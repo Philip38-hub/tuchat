@@ -4,11 +4,6 @@ import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_darwin/local_auth_darwin.dart';
 
 class BiometricAuthWrapper extends StatefulWidget {
-  final Widget child;
-  final bool isAuthenticated;
-  final VoidCallback onAuthenticationSuccess;
-  final VoidCallback onAuthenticationFailure;
-
   const BiometricAuthWrapper({
     super.key,
     required this.child,
@@ -16,6 +11,11 @@ class BiometricAuthWrapper extends StatefulWidget {
     required this.onAuthenticationSuccess,
     required this.onAuthenticationFailure,
   });
+
+  final Widget child;
+  final bool isAuthenticated;
+  final VoidCallback onAuthenticationSuccess;
+  final VoidCallback onAuthenticationFailure;
 
   @override
   State<BiometricAuthWrapper> createState() => _BiometricAuthWrapperState();
@@ -40,17 +40,19 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
       final isDeviceSupported = await _localAuth.isDeviceSupported();
 
       if (canCheckBiometrics && isDeviceSupported) {
-        _authenticateWithBiometrics();
+        await _authenticateWithBiometrics();
       } else {
         widget.onAuthenticationFailure();
       }
-    } catch (e) {
+    } catch (_) {
       widget.onAuthenticationFailure();
     }
   }
 
   Future<void> _authenticateWithBiometrics() async {
-    if (_isAuthenticating) return;
+    if (_isAuthenticating) {
+      return;
+    }
 
     setState(() {
       _isAuthenticating = true;
@@ -64,12 +66,14 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
           const AndroidAuthMessages(
             signInTitle: 'Authenticate to access TuChat',
             cancelButton: 'Cancel',
-            goToSettingsDescription: 'Please set up your biometric credentials in your device settings.',
+            goToSettingsDescription:
+                'Please set up your biometric credentials in your device settings.',
             goToSettingsButton: 'Settings',
           ),
           const IOSAuthMessages(
             cancelButton: 'Cancel',
-            goToSettingsDescription: 'Please set up your biometric credentials in your device settings.',
+            goToSettingsDescription:
+                'Please set up your biometric credentials in your device settings.',
             goToSettingsButton: 'Settings',
           ),
         ],
@@ -80,23 +84,28 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
         ),
       );
 
+      if (!mounted) {
+        return;
+      }
+
       if (authenticated) {
-        if (!mounted) return;
         setState(() {
           _authStatus = 'Authentication successful!';
         });
         widget.onAuthenticationSuccess();
       } else {
-        if (!mounted) return;
         setState(() {
           _authStatus = 'Authentication failed. Please try again.';
         });
         widget.onAuthenticationFailure();
       }
-    } catch (e) {
-      if (!mounted) return;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
-        _authStatus = 'Authentication error: ${e.toString()}';
+        _authStatus = 'Authentication error: $error';
       });
       widget.onAuthenticationFailure();
     } finally {
@@ -117,7 +126,7 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
     return Scaffold(
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -140,7 +149,10 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
                 ElevatedButton(
                   onPressed: _authenticateWithBiometrics,
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 40,
+                      vertical: 15,
+                    ),
                   ),
                   child: const Text(
                     'Authenticate with Biometrics',

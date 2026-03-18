@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:tuchat/main.dart';
+import 'package:tuchat/screens/home_screen.dart';
 
 void main() {
   testWidgets('Home screen renders welcome copy', (WidgetTester tester) async {
