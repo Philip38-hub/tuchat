@@ -1,17 +1,28 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:tuchat/screens/home_screen.dart';
+import 'package:tuchat/models/user.dart';
 
 void main() {
-  testWidgets('Home screen renders welcome copy', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: HomeScreen(),
-      ),
+  test('AppUser reports profile completion from username', () {
+    final incompleteUser = AppUser(
+      uid: 'uid-1',
+      username: '',
+      email: 'incomplete@example.com',
+      profilePicUrl: '',
+      publicKey: 'key-1',
+      createdAt: DateTime(2026, 3, 19),
     );
 
-    expect(find.text('Welcome to TuChat!'), findsOneWidget);
-    expect(find.text('Your secure messaging app'), findsOneWidget);
+    final completeUser = AppUser(
+      uid: 'uid-2',
+      username: 'alice',
+      email: 'alice@example.com',
+      profilePicUrl: '',
+      publicKey: 'key-2',
+      createdAt: DateTime(2026, 3, 19),
+    );
+
+    expect(incompleteUser.isProfileComplete, isFalse);
+    expect(completeUser.isProfileComplete, isTrue);
+    expect(completeUser.displayName, 'alice');
   });
 }

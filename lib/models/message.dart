@@ -51,10 +51,4 @@ class Message {
   }
 }
 
-enum MessageType {
-  text,
-  image,
-  video,
-  audio,
-  file,
-}
+enum MessageType { text, image, video, audio, file }

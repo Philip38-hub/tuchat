@@ -21,11 +21,11 @@ abstract class BaseService {
   /// Handles errors and returns a user-friendly message
   String handleException(Object error) {
     logError('Exception occurred: $error');
-    
+
     if (error is String) {
       return error;
     }
-    
+
     // Handle Firebase Auth exceptions
     if (error.toString().contains('user-not-found')) {
       return 'No user found with this email address.';
@@ -44,7 +44,7 @@ abstract class BaseService {
     } else if (error.toString().contains('CONFIGURATION_NOT_FOUND')) {
       return 'Firebase Auth Android configuration is incomplete. Add your Android app SHA fingerprints in Firebase Console and download an updated google-services.json.';
     }
-    
+
     return 'An unexpected error occurred. Please try again.';
   }
 
@@ -68,5 +68,11 @@ abstract class BaseService {
   /// Validates display name
   bool isValidDisplayName(String name) {
     return name.isNotEmpty && name.length >= 2 && name.length <= 50;
+  }
+
+  /// Validates usernames used in the user directory
+  bool isValidUsername(String username) {
+    final usernameRegex = RegExp(r'^[a-zA-Z0-9._]{3,20}$');
+    return usernameRegex.hasMatch(username);
   }
 }

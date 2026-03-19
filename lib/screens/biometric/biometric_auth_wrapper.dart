@@ -130,11 +130,7 @@ class _BiometricAuthWrapperState extends State<BiometricAuthWrapper> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.fingerprint,
-                size: 100,
-                color: Colors.blue,
-              ),
+              const Icon(Icons.fingerprint, size: 100, color: Colors.blue),
               const SizedBox(height: 30),
               Text(
                 _authStatus,

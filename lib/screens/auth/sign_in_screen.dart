@@ -3,10 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:tuchat/providers/auth_provider.dart';
 
 class SignInScreen extends StatefulWidget {
-  const SignInScreen({
-    super.key,
-    required this.onSwitchToSignUp,
-  });
+  const SignInScreen({super.key, required this.onSwitchToSignUp});
 
   final VoidCallback onSwitchToSignUp;
 
@@ -45,9 +42,7 @@ class _SignInScreenState extends State<SignInScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(authProvider.errorMessage ?? 'Sign in failed.'),
-        ),
+        SnackBar(content: Text(authProvider.errorMessage ?? 'Sign in failed.')),
       );
     }
   }

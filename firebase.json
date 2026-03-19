@@ -1,1 +1,25 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"tuchat-d0a3b","appId":"1:37242245128:android:7f7b680bd1ec79b3dcc1bd","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"tuchat-d0a3b","configurations":{"android":"1:37242245128:android:7f7b680bd1ec79b3dcc1bd","ios":"1:37242245128:ios:79e0f1a1b288c148dcc1bd"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "tuchat-d0a3b",
+          "appId": "1:37242245128:android:7f7b680bd1ec79b3dcc1bd",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "tuchat-d0a3b",
+          "configurations": {
+            "android": "1:37242245128:android:7f7b680bd1ec79b3dcc1bd",
+            "ios": "1:37242245128:ios:79e0f1a1b288c148dcc1bd"
+          }
+        }
+      }
+    }
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

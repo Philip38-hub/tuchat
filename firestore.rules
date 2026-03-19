@@ -15,8 +15,14 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow create, read, update: if isCurrentUser(userId);
+      allow read: if isSignedIn();
+      allow create, update: if isCurrentUser(userId);
       allow delete: if false;
+
+      match /contacts/{contactId} {
+        allow read, create, update: if isCurrentUser(userId);
+        allow delete: if false;
+      }
     }
 
     match /chats/{chatId} {

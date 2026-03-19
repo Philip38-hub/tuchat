@@ -33,8 +33,8 @@ class Chat {
       id: chatId,
       participants: List<String>.from(map['participants'] ?? []),
       lastMessage: map['lastMessage'],
-      lastMessageTime: map['lastMessageTime'] != null 
-          ? (map['lastMessageTime'] as Timestamp).toDate() 
+      lastMessageTime: map['lastMessageTime'] != null
+          ? (map['lastMessageTime'] as Timestamp).toDate()
           : null,
       lastSenderId: map['lastSenderId'],
       unreadCount: map['unreadCount'] ?? 0,
