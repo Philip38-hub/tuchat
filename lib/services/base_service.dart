@@ -41,6 +41,8 @@ abstract class BaseService {
       return 'Network error. Please check your internet connection.';
     } else if (error.toString().contains('too-many-requests')) {
       return 'Too many requests. Please try again later.';
+    } else if (error.toString().contains('CONFIGURATION_NOT_FOUND')) {
+      return 'Firebase Auth Android configuration is incomplete. Add your Android app SHA fingerprints in Firebase Console and download an updated google-services.json.';
     }
     
     return 'An unexpected error occurred. Please try again.';

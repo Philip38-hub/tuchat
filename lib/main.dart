@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
+import 'screens/auth/auth_flow_screen.dart';
 import 'screens/biometric/biometric_auth_wrapper.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
@@ -40,16 +41,19 @@ class TuChatApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: Consumer<AuthProvider>(
-        builder: (context, authProvider, child) {
+        builder: (context, authProvider, _) {
+          if (!authProvider.isUserSignedIn) {
+            return const AuthFlowScreen();
+          }
+
           return BiometricAuthWrapper(
             isAuthenticated: authProvider.isBiometricAuthenticated,
             onAuthenticationSuccess: authProvider.markBiometricAuthenticated,
             onAuthenticationFailure:
                 authProvider.resetBiometricAuthentication,
-            child: child!,
+            child: const HomeScreen(),
           );
         },
-        child: const HomeScreen(),
       ),
     );
   }

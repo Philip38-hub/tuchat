@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
@@ -8,6 +9,7 @@ import 'base_service.dart';
 
 class AuthService extends BaseService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
 
@@ -39,17 +41,21 @@ class AuthService extends BaseService {
         // Update display name if provided
         if (displayName != null && isValidDisplayName(displayName)) {
           await firebaseUser.updateDisplayName(displayName);
+          await firebaseUser.reload();
         }
 
-        // Store user data in Firestore would go here
-        // For now, we'll create a basic AppUser object
-        
+        final refreshedUser = _auth.currentUser ?? firebaseUser;
         final user = AppUser.fromFirebaseAuth({
-          'uid': firebaseUser.uid,
-          'email': firebaseUser.email,
-          'displayName': firebaseUser.displayName,
-          'photoUrl': firebaseUser.photoURL,
+          'uid': refreshedUser.uid,
+          'email': refreshedUser.email,
+          'displayName': refreshedUser.displayName,
+          'photoUrl': refreshedUser.photoURL,
         });
+
+        await _createOrUpdateUserProfile(
+          user: user,
+          isNewUser: true,
+        );
 
         log('User signed up successfully: ${user.id}');
         return user;
@@ -82,12 +88,16 @@ class AuthService extends BaseService {
 
       final firebaseUser = userCredential.user;
       if (firebaseUser != null) {
-        final user = AppUser.fromFirebaseAuth({
+        final firestoreProfile = await _getUserProfile(firebaseUser.uid);
+        final user = firestoreProfile ??
+            AppUser.fromFirebaseAuth({
           'uid': firebaseUser.uid,
           'email': firebaseUser.email,
           'displayName': firebaseUser.displayName,
           'photoUrl': firebaseUser.photoURL,
         });
+
+        await _createOrUpdateUserProfile(user: user);
 
         log('User signed in successfully: ${user.id}');
         return user;
@@ -130,6 +140,48 @@ class AuthService extends BaseService {
       });
     }
     return null;
+  }
+
+  Future<void> _createOrUpdateUserProfile({
+    required AppUser user,
+    bool isNewUser = false,
+  }) async {
+    final userRef = _firestore.collection('users').doc(user.id);
+    final existingSnapshot = await userRef.get();
+    final existingData = existingSnapshot.data();
+    final now = DateTime.now();
+
+    await userRef.set(
+      {
+        'id': user.id,
+        'email': user.email,
+        'displayName': user.displayName,
+        'photoUrl': user.photoUrl,
+        'createdAt': existingData?['createdAt'] ?? user.createdAt,
+        'lastSeen': now,
+      },
+      SetOptions(merge: true),
+    );
+
+    if (isNewUser) {
+      log('Created Firestore profile for user: ${user.id}');
+    } else {
+      log('Updated Firestore profile for user: ${user.id}');
+    }
+  }
+
+  Future<AppUser?> _getUserProfile(String uid) async {
+    final snapshot = await _firestore.collection('users').doc(uid).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    final data = snapshot.data();
+    if (data == null) {
+      return null;
+    }
+
+    return AppUser.fromMap(data, uid);
   }
 
   /// Enables biometric authentication for the current user

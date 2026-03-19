@@ -22,15 +22,19 @@ class AuthProvider extends ChangeNotifier {
     String password,
     String? displayName,
   ) async {
-    return _runWithState(
-      () => _authService.signUp(email, password, displayName),
-    );
+    return _runWithState(() async {
+      final user = await _authService.signUp(email, password, displayName);
+      _isBiometricAuthenticated = false;
+      return user;
+    });
   }
 
   Future<AppUser?> signIn(String email, String password) async {
-    return _runWithState(
-      () => _authService.signIn(email, password),
-    );
+    return _runWithState(() async {
+      final user = await _authService.signIn(email, password);
+      _isBiometricAuthenticated = false;
+      return user;
+    });
   }
 
   Future<void> signOut() async {
@@ -105,5 +109,14 @@ class AuthProvider extends ChangeNotifier {
       _isBusy = false;
       notifyListeners();
     }
+  }
+
+  void clearError() {
+    if (_errorMessage == null) {
+      return;
+    }
+
+    _errorMessage = null;
+    notifyListeners();
   }
 }
