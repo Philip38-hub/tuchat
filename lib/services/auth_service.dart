@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +8,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_darwin/local_auth_darwin.dart';
 import 'package:tuchat/models/user.dart';
+import 'package:tuchat/services/encryption_service.dart';
 
 import 'base_service.dart';
 
@@ -17,6 +17,7 @@ class AuthService extends BaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
+  final EncryptionService _encryptionService = EncryptionService();
 
   AppUser? _cachedUser;
 
@@ -56,12 +57,13 @@ class AuthService extends BaseService {
       }
 
       final refreshedUser = _auth.currentUser ?? firebaseUser;
+      final keyPair = await _encryptionService.ensureKeyPair(uid: refreshedUser.uid);
       final user = AppUser(
         uid: refreshedUser.uid,
         username: displayName?.trim() ?? '',
         email: refreshedUser.email ?? email,
         profilePicUrl: refreshedUser.photoURL ?? '',
-        publicKey: _generatePublicKey(),
+        publicKey: keyPair.publicKey,
         createdAt: DateTime.now(),
         lastSeen: DateTime.now(),
       );
@@ -107,10 +109,16 @@ class AuthService extends BaseService {
         'displayName': firebaseUser.displayName,
         'photoUrl': firebaseUser.photoURL,
       });
+      final needsKeyRefresh =
+          firestoreProfile == null ||
+          !_encryptionService.isValidPublicKey(firestoreProfile.publicKey);
+      final keyPair = await _encryptionService.ensureKeyPair(
+        uid: firebaseUser.uid,
+        expectedPublicKey: needsKeyRefresh ? null : firestoreProfile.publicKey,
+      );
 
       final user =
-          firestoreProfile ??
-          fallbackUser.copyWith(publicKey: _generatePublicKey());
+          (firestoreProfile ?? fallbackUser).copyWith(publicKey: keyPair.publicKey);
       await _createOrUpdateUserProfile(
         user: user.copyWith(lastSeen: DateTime.now()),
       );
@@ -129,7 +137,7 @@ class AuthService extends BaseService {
     try {
       log('Signing out user');
       await _auth.signOut();
-      await _secureStorage.deleteAll();
+      await _secureStorage.delete(key: _biometricAuthTimeKey);
       _cachedUser = null;
       log('User signed out successfully');
     } catch (e) {
@@ -226,6 +234,13 @@ class AuthService extends BaseService {
       }
 
       final existingUser = await _getUserProfile(firebaseUser.uid);
+      final needsKeyRefresh =
+          existingUser == null ||
+          !_encryptionService.isValidPublicKey(existingUser.publicKey);
+      final keyPair = await _encryptionService.ensureKeyPair(
+        uid: firebaseUser.uid,
+        expectedPublicKey: needsKeyRefresh ? null : existingUser.publicKey,
+      );
       final profilePicUrl = profileImageBytes != null
           ? _encodeProfilePicture(
               bytes: profileImageBytes,
@@ -238,9 +253,7 @@ class AuthService extends BaseService {
         username: trimmedUsername,
         email: firebaseUser.email ?? existingUser?.email ?? '',
         profilePicUrl: profilePicUrl,
-        publicKey: existingUser?.publicKey.isNotEmpty == true
-            ? existingUser!.publicKey
-            : _generatePublicKey(),
+        publicKey: keyPair.publicKey,
         createdAt: existingUser?.createdAt ?? DateTime.now(),
         lastSeen: DateTime.now(),
       );
@@ -338,12 +351,6 @@ class AuthService extends BaseService {
       default:
         return 'image/jpeg';
     }
-  }
-
-  String _generatePublicKey() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
-    return base64UrlEncode(bytes);
   }
 
   Future<void> enableBiometricAuth() async {
