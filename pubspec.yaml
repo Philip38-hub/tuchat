@@ -50,6 +50,8 @@ dependencies:
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.0.0
   image_picker: ^1.1.2
+  cached_network_image: ^3.4.1
+  video_player: ^2.10.1
 
   # State management
   provider: ^6.1.2
