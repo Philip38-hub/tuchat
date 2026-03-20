@@ -33,8 +33,7 @@ Working now:
 
 Not fully complete yet:
 
-- Media upload/send for images and videos
-- Alternative storage provider for media
+- Production-hardening for Supabase media authorization
 - Group chats
 - Push-notification handling in chat flows
 - Broader automated test coverage
@@ -89,6 +88,28 @@ Generated Firebase files:
 - Secret chats store RSA public keys in user documents and keep private keys on
   device in secure storage.
 
+## Supabase Storage Setup
+
+TuChat now uses Supabase Storage for chat media while keeping Firebase Auth and
+Cloud Firestore as the source of truth for users, contacts, chats, and message
+metadata.
+
+1. Create a Supabase project.
+2. Create a storage bucket named `chat-media` or choose your own bucket name.
+3. Mark the bucket as public for the current client-side integration.
+4. Add storage policies that allow `anon` uploads/selects for that bucket.
+5. Run the app with Supabase config:
+   - `flutter run --dart-define=SUPABASE_URL=<your-url> --dart-define=SUPABASE_ANON_KEY=<your-anon-key> --dart-define=SUPABASE_STORAGE_BUCKET=chat-media`
+
+Notes:
+
+- Non-secret media uploads are stored as normal image/video files in Supabase.
+- Secret media uploads are encrypted on-device before upload, and the encrypted
+  metadata is stored in Firestore with the message document.
+- This client-only setup is practical for development, but a stricter
+  production design should move upload authorization behind a trusted backend or
+  Edge Function because Supabase Storage is not using Firebase Auth directly.
+
 ## Run The App
 
 1. Install dependencies:
@@ -141,8 +162,8 @@ Key packages currently used in the app:
 
 ## Known Limitations
 
-- Media sending is intentionally blocked until a storage provider is chosen and
-  integrated.
-- Secret chat encryption is implemented for text messages; media encryption will
-  come with the media pipeline.
+- Supabase Storage is currently integrated through a client-side public-bucket
+  flow because the app uses Firebase Auth rather than Supabase Auth.
+- A production-hardening pass should move media authorization behind a trusted
+  backend or Supabase Edge Function.
 - Existing widget tests are still minimal and do not yet cover full chat flows.
