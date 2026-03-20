@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:tuchat/models/chat.dart';
 import 'package:tuchat/models/user.dart';
 import 'package:tuchat/providers/auth_provider.dart';
+import 'package:tuchat/screens/chat/chat_screen.dart';
 import 'package:tuchat/screens/contacts/qr_scanner_screen.dart';
 import 'package:tuchat/screens/profile/profile_setup_screen.dart';
 import 'package:tuchat/services/chat_service.dart';
@@ -40,8 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _searchUsers(String query) async {
-    final authProvider = context.read<AuthProvider>();
-    final currentUser = authProvider.currentUser;
+    final currentUser = context.read<AuthProvider>().currentUser;
 
     if (query.trim().isEmpty || currentUser == null) {
       setState(() {
@@ -113,6 +114,46 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openChat(
+    AppUser otherUser, {
+    bool isSecretChat = false,
+  }) async {
+    final currentUser = context.read<AuthProvider>().currentUser;
+    if (currentUser == null) {
+      return;
+    }
+
+    try {
+      final chat = await context.read<ChatService>().createOrGetDirectChat(
+        currentUserId: currentUser.uid,
+        otherUserId: otherUser.uid,
+        isSecretChat: isSecretChat,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            currentUser: currentUser,
+            otherUser: otherUser,
+            chat: chat,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   Future<void> _scanQrCode() async {
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser == null) {
@@ -145,136 +186,378 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('TuChat'),
-        actions: [
-          IconButton(
-            onPressed: _openProfileSetup,
-            icon: const Icon(Icons.person_outline),
-            tooltip: 'Edit profile',
-          ),
-          IconButton(
-            onPressed: authProvider.isBusy
-                ? null
-                : () async {
-                    await context.read<AuthProvider>().signOut();
-                  },
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          _ProfileHeader(user: user),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Your QR code',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Share this QR code so another TuChat user can add you instantly.',
-                  ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: QrImageView(
-                      data: user.uid,
-                      size: 200,
-                      backgroundColor: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SelectableText(user.uid, textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _scanQrCode,
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan QR to add contact'),
-                    ),
-                  ),
-                ],
+    final chatService = context.read<ChatService>();
+
+    return MultiProvider(
+      providers: [
+        StreamProvider<List<AppUser>>.value(
+          value: chatService.streamContacts(user.uid),
+          initialData: const [],
+        ),
+        StreamProvider<List<Chat>>.value(
+          value: chatService.streamChats(user.uid),
+          initialData: const [],
+        ),
+      ],
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          appBar: AppBar(
+            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            title: const Text('TuChat'),
+            bottom: const TabBar(
+              tabs: [
+                Tab(text: 'Chats'),
+                Tab(text: 'Contacts'),
+                Tab(text: 'Connect'),
+              ],
+            ),
+            actions: [
+              IconButton(
+                onPressed: _openProfileSetup,
+                icon: const Icon(Icons.person_outline),
+                tooltip: 'Edit profile',
               ),
+              IconButton(
+                onPressed: authProvider.isBusy
+                    ? null
+                    : () async {
+                        await context.read<AuthProvider>().signOut();
+                      },
+                icon: const Icon(Icons.logout),
+                tooltip: 'Sign out',
+              ),
+            ],
+          ),
+          body: TabBarView(
+            children: [
+              _ChatsTab(
+                currentUser: user,
+                onOpenChat: _openChat,
+              ),
+              _ContactsTab(
+                currentUser: user,
+                onOpenChat: _openChat,
+              ),
+              _ConnectTab(
+                currentUser: user,
+                searchController: _searchController,
+                searchResults: _searchResults,
+                isSearching: _isSearching,
+                onSearchChanged: _searchUsers,
+                onAddContact: _addContact,
+                onOpenChat: _openChat,
+                onScanQrCode: _scanQrCode,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatsTab extends StatelessWidget {
+  const _ChatsTab({
+    required this.currentUser,
+    required this.onOpenChat,
+  });
+
+  final AppUser currentUser;
+  final Future<void> Function(AppUser otherUser, {bool isSecretChat}) onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    final chats = context.watch<List<Chat>>();
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _ProfileHeader(user: currentUser),
+        const SizedBox(height: 16),
+        if (chats.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('No chats yet. Add a contact or start one from the Connect tab.'),
+            ),
+          )
+        else
+          ...chats.map(
+            (chat) => _ChatListTile(
+              currentUserId: currentUser.uid,
+              chat: chat,
+              onOpenChat: onOpenChat,
             ),
           ),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Find people',
-                    style: Theme.of(context).textTheme.titleLarge,
+      ],
+    );
+  }
+}
+
+class _ContactsTab extends StatelessWidget {
+  const _ContactsTab({
+    required this.currentUser,
+    required this.onOpenChat,
+  });
+
+  final AppUser currentUser;
+  final Future<void> Function(AppUser otherUser, {bool isSecretChat}) onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    final contacts = context.watch<List<AppUser>>();
+
+    if (contacts.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text('No contacts yet. Use search or scan a QR code to add someone.'),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: contacts.length,
+      itemBuilder: (context, index) {
+        final contact = contacts[index];
+        return Card(
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundImage: buildProfileImageProvider(contact.profilePicUrl),
+              child: contact.profilePicUrl.isEmpty
+                  ? Text(contact.username.substring(0, 1).toUpperCase())
+                  : null,
+            ),
+            title: Text(contact.username),
+            subtitle: Text(contact.email),
+            trailing: PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'chat') {
+                  onOpenChat(contact);
+                } else if (value == 'secret') {
+                  onOpenChat(contact, isSecretChat: true);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'chat',
+                  child: Text('Open chat'),
+                ),
+                PopupMenuItem(
+                  value: 'secret',
+                  child: Text('Open secret chat'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ConnectTab extends StatelessWidget {
+  const _ConnectTab({
+    required this.currentUser,
+    required this.searchController,
+    required this.searchResults,
+    required this.isSearching,
+    required this.onSearchChanged,
+    required this.onAddContact,
+    required this.onOpenChat,
+    required this.onScanQrCode,
+  });
+
+  final AppUser currentUser;
+  final TextEditingController searchController;
+  final List<AppUser> searchResults;
+  final bool isSearching;
+  final ValueChanged<String> onSearchChanged;
+  final Future<void> Function(String contactUid) onAddContact;
+  final Future<void> Function(AppUser otherUser, {bool isSecretChat}) onOpenChat;
+  final Future<void> Function() onScanQrCode;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your QR code',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Share this QR code so another TuChat user can add you instantly.',
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: QrImageView(
+                    data: currentUser.uid,
+                    size: 200,
+                    backgroundColor: Colors.white,
                   ),
-                  const SizedBox(height: 8),
-                  const Text('Search by username to find another TuChat user.'),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _searchController,
-                    onChanged: _searchUsers,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search username',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _searchController.text.isEmpty
-                          ? null
-                          : IconButton(
-                              onPressed: () {
-                                _searchController.clear();
-                                _searchUsers('');
-                              },
-                              icon: const Icon(Icons.clear),
-                            ),
-                      border: const OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 12),
+                SelectableText(currentUser.uid, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onScanQrCode,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan QR to add contact'),
                   ),
-                  const SizedBox(height: 16),
-                  if (_isSearching)
-                    const Center(child: CircularProgressIndicator())
-                  else if (_searchController.text.trim().isNotEmpty &&
-                      _searchResults.isEmpty)
-                    const Text('No users found for that username.')
-                  else
-                    ..._searchResults.map(
-                      (result) => ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: CircleAvatar(
-                          backgroundImage: buildProfileImageProvider(
-                            result.profilePicUrl,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Find people',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                const Text('Search by username to find another TuChat user.'),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: searchController,
+                  onChanged: onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search username',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: searchController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () {
+                              searchController.clear();
+                              onSearchChanged('');
+                            },
+                            icon: const Icon(Icons.clear),
                           ),
-                          child: result.profilePicUrl.isEmpty
-                              ? Text(
-                                  result.username.substring(0, 1).toUpperCase(),
-                                )
-                              : null,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (isSearching)
+                  const Center(child: CircularProgressIndicator())
+                else if (searchController.text.trim().isNotEmpty &&
+                    searchResults.isEmpty)
+                  const Text('No users found for that username.')
+                else
+                  ...searchResults.map(
+                    (result) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: CircleAvatar(
+                        backgroundImage: buildProfileImageProvider(
+                          result.profilePicUrl,
                         ),
-                        title: Text(result.username),
-                        subtitle: Text(result.email),
-                        trailing: FilledButton(
-                          onPressed: () => _addContact(result.uid),
-                          child: const Text('Add'),
-                        ),
+                        child: result.profilePicUrl.isEmpty
+                            ? Text(result.username.substring(0, 1).toUpperCase())
+                            : null,
+                      ),
+                      title: Text(result.username),
+                      subtitle: Text(result.email),
+                      trailing: Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => onAddContact(result.uid),
+                            child: const Text('Add'),
+                          ),
+                          FilledButton(
+                            onPressed: () => onOpenChat(result),
+                            child: const Text('Chat'),
+                          ),
+                        ],
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChatListTile extends StatelessWidget {
+  const _ChatListTile({
+    required this.currentUserId,
+    required this.chat,
+    required this.onOpenChat,
+  });
+
+  final String currentUserId;
+  final Chat chat;
+  final Future<void> Function(AppUser otherUser, {bool isSecretChat}) onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    final otherUserId = chat.participants.firstWhere(
+      (id) => id != currentUserId,
+      orElse: () => '',
+    );
+    final chatService = context.read<ChatService>();
+
+    return FutureBuilder<AppUser?>(
+      future: chatService.getUserByUid(otherUserId),
+      builder: (context, snapshot) {
+        final user = snapshot.data;
+        if (user == null) {
+          return const SizedBox.shrink();
+        }
+
+        final unreadCount = chat.unreadCountFor(currentUserId);
+        return Card(
+          child: ListTile(
+            onTap: () => onOpenChat(user, isSecretChat: chat.isSecretChat),
+            leading: CircleAvatar(
+              backgroundImage: buildProfileImageProvider(user.profilePicUrl),
+              child: user.profilePicUrl.isEmpty
+                  ? Text(user.username.substring(0, 1).toUpperCase())
+                  : null,
+            ),
+            title: Row(
+              children: [
+                Expanded(child: Text(user.username)),
+                if (chat.isSecretChat) const Icon(Icons.lock_outline, size: 18),
+              ],
+            ),
+            subtitle: Text(
+              chat.lastMessage ?? 'Start chatting',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: unreadCount > 0
+                ? CircleAvatar(
+                    radius: 12,
+                    child: Text(
+                      unreadCount.toString(),
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  )
+                : null,
+          ),
+        );
+      },
     );
   }
 }
