@@ -1,47 +1,41 @@
 # TuChat
 
-TuChat is a secure mobile messaging app built with Flutter and Firebase. It
-currently supports Firebase email/password auth, biometric app unlock, profile
-setup, contact discovery, QR-based adding, end-to-end encryption for secret
-chats, and real-time one-to-one messaging.
+TuChat is a Flutter mobile messaging app that uses Firebase for authentication
+and Cloud Firestore data, with Supabase Storage for chat media. It supports
+biometric unlock, user profiles, contact discovery, direct chats, secret chats,
+and real-time messaging.
 
-## Current Status
+## Features
 
-Completed so far:
-
-- Phase 1: project structure, Provider-based state management, auth service,
-  biometric unlock wrapper, and Firebase Auth wiring
-- Phase 2: Firestore user schema, profile setup/edit flow, inline profile image
-  handling, username search, and QR add-contact flow
-- Phase 3: RSA keypair generation, secure local private-key storage, Firestore
-  public-key storage, and hybrid AES/RSA encryption for secret chats
-- Phase 4: real-time chat UI, message streams, typing indicators, read
-  receipts, edit/delete actions, contact streaming, and chat/security rule
-  fixes
-
-Working now:
-
-- Sign up and sign in
+- Email/password sign up and sign in with Firebase Auth
 - Biometric gate before entering the app
-- Profile creation and profile editing
-- Username search and add contact
-- Open normal chat and secret chat
-- Send text messages in real time
-- Read receipts
-- Typing indicators
+- User profile creation and editing
+- Username search and QR-based contact adding
+- Real-time one-to-one chats
+- Secret chats with hybrid RSA/AES encryption
+- Read receipts and typing indicators
 - Edit and delete your own messages
+- Image and video media messages backed by Supabase Storage
 
-Not fully complete yet:
+## Tech Stack
 
-- Production-hardening for Supabase media authorization
-- Group chats
-- Push-notification handling in chat flows
-- Broader automated test coverage
+- Flutter
+- Provider
+- Firebase Auth
+- Cloud Firestore
+- Flutter Secure Storage
+- Supabase Storage
+- `encrypt`, `asn1lib`, `pointycastle`
+- `local_auth`
+- `image_picker`
+- `cached_network_image`
+- `video_player`
 
 ## Project Structure
 
 ```text
 lib/
+  config/
   models/
   providers/
   screens/
@@ -49,121 +43,150 @@ lib/
   utils/
 ```
 
-- `services/` contains Firebase, encryption, and device-facing logic
-- `providers/` contains UI-facing state management built with Provider
-- `screens/` contains authentication, profile, contact, and chat screens
-- `models/` contains Firestore/domain models such as users, chats, and messages
+## Prerequisites
 
-## Firebase Project
+Make sure you have the following installed:
 
-This workspace is wired to Firebase project `tuchat-d0a3b`.
+- Flutter SDK
+- Android Studio or Xcode
+- Firebase CLI
+- FlutterFire CLI
 
-Generated Firebase files:
+Helpful install commands:
 
-- `lib/firebase_options.dart`
-- `android/app/google-services.json`
+```bash
+npm install -g firebase-tools
+dart pub global activate flutterfire_cli
+```
 
-## Firebase Setup
+## Local Setup
 
-1. Install Flutter and Android Studio or the Android SDK command-line tools.
-2. Install the Firebase CLI:
-   - `npm install -g firebase-tools`
-3. Install the FlutterFire CLI:
-   - `dart pub global activate flutterfire_cli`
-4. Make sure `~/.pub-cache/bin` is on your shell `PATH`.
-5. Log in to Firebase:
-   - `firebase login`
-6. Configure this app if needed:
-   - `flutterfire configure --project=<firebase-project-id> --platforms=android,ios`
-7. In Firebase Console, enable Email/Password under Authentication.
-8. Create a Firestore database.
-9. Deploy the Firestore rules from this repo:
-   - `firebase deploy --only firestore:rules --project tuchat-d0a3b`
+### 1. Clone and install dependencies
 
-## Firestore Notes
+```bash
+git clone https://github.com/Philip38-hub/tuchat.git
+cd tuchat
+flutter pub get
+```
 
-- The app relies on `firestore.rules` for contacts, chats, and messages.
-- If chat list queries prompt for an index, create the index from the Firebase
+### 2. Firebase setup
+
+This project is already wired to Firebase project `tuchat-d0a3b`, but if you
+need to reconfigure it:
+
+```bash
+firebase login
+flutterfire configure --project=tuchat-d0a3b --platforms=android,ios
+```
+
+In Firebase Console:
+
+- Enable Email/Password sign-in under Authentication
+- Create a Firestore database
+
+Deploy Firestore rules:
+
+```bash
+firebase deploy --only firestore:rules --project <PROJECT_ID>
+```
+
+Important notes:
+
+- `firestore.rules` controls contacts, chats, and messages.
+- When Firestore asks for a composite index, create it from the Firebase
   Console link shown in the error.
-- Secret chats store RSA public keys in user documents and keep private keys on
-  device in secure storage.
 
-## Supabase Storage Setup
+### 3. Supabase Storage setup
 
-TuChat now uses Supabase Storage for chat media while keeping Firebase Auth and
-Cloud Firestore as the source of truth for users, contacts, chats, and message
-metadata.
+Create a Supabase project and configure Storage for chat media.
 
-1. Create a Supabase project.
-2. Create a storage bucket named `chat-media` or choose your own bucket name.
-3. Mark the bucket as public for the current client-side integration.
-4. Add storage policies that allow `anon` uploads/selects for that bucket.
-5. Run the app with Supabase config:
-   - `flutter run --dart-define=SUPABASE_URL=<your-url> --dart-define=SUPABASE_ANON_KEY=<your-anon-key> --dart-define=SUPABASE_STORAGE_BUCKET=chat-media`
+1. Create a bucket named `chat-media` or choose another bucket name.
+2. For the current client-side integration, mark the bucket as public.
+3. Add storage policies in the Supabase SQL editor:
 
-Notes:
+```sql
+drop policy if exists "chat media public read" on storage.objects;
+drop policy if exists "chat media public insert" on storage.objects;
+drop policy if exists "chat media public update" on storage.objects;
 
-- Non-secret media uploads are stored as normal image/video files in Supabase.
-- Secret media uploads are encrypted on-device before upload, and the encrypted
-  metadata is stored in Firestore with the message document.
-- This client-only setup is practical for development, but a stricter
-  production design should move upload authorization behind a trusted backend or
-  Edge Function because Supabase Storage is not using Firebase Auth directly.
+create policy "chat media public read"
+on storage.objects
+for select
+to anon
+using (bucket_id = 'chat-media');
 
-## Run The App
+create policy "chat media public insert"
+on storage.objects
+for insert
+to anon
+with check (bucket_id = 'chat-media');
 
-1. Install dependencies:
-   - `flutter pub get`
-2. Verify the project:
-   - `flutter analyze`
-   - `flutter test`
-3. List devices:
-   - `flutter devices`
-4. Run on Android or iOS:
-   - `flutter run -d <device-id>`
+create policy "chat media public update"
+on storage.objects
+for update
+to anon
+using (bucket_id = 'chat-media')
+with check (bucket_id = 'chat-media');
+```
 
-Example from this workspace:
+### 4. Run locally
 
-- `flutter run -d RZ8W10PB5RZ`
+Provide Supabase values with `--dart-define`:
 
-## Android Permissions
+```bash
+flutter run \
+  --dart-define=SUPABASE_URL=YOUR_SUPABASE_URL \
+  --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY \
+  --dart-define=SUPABASE_STORAGE_BUCKET=chat-media
+```
 
-Configured in `android/app/src/main/AndroidManifest.xml`:
+If you want to target a specific device:
+
+```bash
+flutter devices
+flutter run -d <device-id> \
+  --dart-define=SUPABASE_URL=YOUR_SUPABASE_URL \
+  --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY \
+  --dart-define=SUPABASE_STORAGE_BUCKET=chat-media
+```
+
+## Verification
+
+Run:
+
+```bash
+flutter analyze
+flutter test
+```
+
+## Security Notes
+
+- Firebase Auth is the source of truth for user identity.
+- Cloud Firestore is the source of truth for users, contacts, chats, and
+  message metadata.
+- Supabase Storage stores media file bytes only.
+- Secret chat private keys are kept on-device in secure storage and are never
+  uploaded.
+- Secret chat text and secret media are encrypted on-device before being stored
+  or uploaded.
+
+## Platform Permissions
+
+Android:
 
 - `android.permission.USE_BIOMETRIC`
 - `android.permission.USE_FINGERPRINT`
 - `android.permission.CAMERA`
 
-## iOS Permissions
-
-Configured in `ios/Runner/Info.plist`:
+iOS:
 
 - `NSFaceIDUsageDescription`
 - `NSCameraUsageDescription`
 
-## Current Packages In Use
+## Limitations
 
-Key packages currently used in the app:
-
-- `provider`
-- `firebase_auth`
-- `cloud_firestore`
-- `firebase_messaging`
-- `flutter_secure_storage`
-- `encrypt`
-- `asn1lib`
-- `pointycastle`
-- `local_auth`
-- `qr_flutter`
-- `mobile_scanner`
-- `image_picker`
-- `cached_network_image`
-- `video_player`
-
-## Known Limitations
-
-- Supabase Storage is currently integrated through a client-side public-bucket
-  flow because the app uses Firebase Auth rather than Supabase Auth.
-- A production-hardening pass should move media authorization behind a trusted
+- Supabase Storage currently uses a client-side public-bucket flow because the
+  app uses Firebase Auth rather than Supabase Auth.
+- A production deployment should harden media authorization with a trusted
   backend or Supabase Edge Function.
-- Existing widget tests are still minimal and do not yet cover full chat flows.
+- Automated test coverage is still light for full chat and media flows.
