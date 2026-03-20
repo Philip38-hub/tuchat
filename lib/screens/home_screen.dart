@@ -6,6 +6,7 @@ import 'package:tuchat/providers/auth_provider.dart';
 import 'package:tuchat/screens/contacts/qr_scanner_screen.dart';
 import 'package:tuchat/screens/profile/profile_setup_screen.dart';
 import 'package:tuchat/services/chat_service.dart';
+import 'package:tuchat/utils/profile_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -251,9 +252,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       (result) => ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: CircleAvatar(
-                          backgroundImage: result.profilePicUrl.isNotEmpty
-                              ? NetworkImage(result.profilePicUrl)
-                              : null,
+                          backgroundImage: buildProfileImageProvider(
+                            result.profilePicUrl,
+                          ),
                           child: result.profilePicUrl.isEmpty
                               ? Text(
                                   result.username.substring(0, 1).toUpperCase(),
@@ -292,9 +293,7 @@ class _ProfileHeader extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 32,
-              backgroundImage: user.profilePicUrl.isNotEmpty
-                  ? NetworkImage(user.profilePicUrl)
-                  : null,
+              backgroundImage: buildProfileImageProvider(user.profilePicUrl),
               child: user.profilePicUrl.isEmpty
                   ? Text(
                       user.username.substring(0, 1).toUpperCase(),

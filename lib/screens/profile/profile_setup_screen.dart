@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:tuchat/providers/auth_provider.dart';
+import 'package:tuchat/utils/profile_image.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -38,8 +39,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Future<void> _pickImage() async {
     final image = await _imagePicker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 85,
-      maxWidth: 1200,
+      imageQuality: 55,
+      maxWidth: 400,
+      maxHeight: 400,
     );
 
     if (image == null) {
@@ -102,9 +104,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     final currentUser = authProvider.currentUser;
     final ImageProvider<Object>? profileImage = _selectedImageBytes != null
         ? MemoryImage(_selectedImageBytes!)
-        : (currentUser?.profilePicUrl.isNotEmpty == true
-              ? NetworkImage(currentUser!.profilePicUrl)
-              : null);
+        : buildProfileImageProvider(currentUser?.profilePicUrl);
 
     return Scaffold(
       appBar: AppBar(
