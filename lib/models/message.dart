@@ -7,13 +7,16 @@ class Message {
   final String receiverId;
   final String content;
   final String? encryptedContent;
-  final String? encryptedSymmetricKey;
+  final String? recipientEncryptedSymmetricKey;
+  final String? senderEncryptedSymmetricKey;
   final String? initializationVector;
   final DateTime timestamp;
   final bool isRead;
   final DateTime? readAt;
   final MessageType type;
   final String? mediaUrl;
+  final String? storagePath;
+  final String? mimeType;
   final String? fileName;
   final bool isEdited;
   final DateTime? editedAt;
@@ -28,13 +31,16 @@ class Message {
     required this.receiverId,
     required this.content,
     this.encryptedContent,
-    this.encryptedSymmetricKey,
+    this.recipientEncryptedSymmetricKey,
+    this.senderEncryptedSymmetricKey,
     this.initializationVector,
     required this.timestamp,
     this.isRead = false,
     this.readAt,
     this.type = MessageType.text,
     this.mediaUrl,
+    this.storagePath,
+    this.mimeType,
     this.fileName,
     this.isEdited = false,
     this.editedAt,
@@ -51,13 +57,17 @@ class Message {
       'receiverId': receiverId,
       'content': content,
       'encryptedContent': encryptedContent,
-      'encryptedSymmetricKey': encryptedSymmetricKey,
+      'encryptedSymmetricKey': recipientEncryptedSymmetricKey,
+      'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
+      'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
       'initializationVector': initializationVector,
       'timestamp': timestamp,
       'isRead': isRead,
       'readAt': readAt,
       'type': type.name,
       'mediaUrl': mediaUrl,
+      'storagePath': storagePath,
+      'mimeType': mimeType,
       'fileName': fileName,
       'isEdited': isEdited,
       'editedAt': editedAt,
@@ -75,7 +85,9 @@ class Message {
       receiverId: map['receiverId'] ?? '',
       content: map['content'] ?? '',
       encryptedContent: map['encryptedContent'],
-      encryptedSymmetricKey: map['encryptedSymmetricKey'],
+      recipientEncryptedSymmetricKey:
+          map['recipientEncryptedSymmetricKey'] ?? map['encryptedSymmetricKey'],
+      senderEncryptedSymmetricKey: map['senderEncryptedSymmetricKey'],
       initializationVector: map['initializationVector'],
       timestamp: map['timestamp'] is Timestamp
           ? (map['timestamp'] as Timestamp).toDate()
@@ -89,6 +101,8 @@ class Message {
         orElse: () => MessageType.text,
       ),
       mediaUrl: map['mediaUrl'],
+      storagePath: map['storagePath'],
+      mimeType: map['mimeType'],
       fileName: map['fileName'],
       isEdited: map['isEdited'] ?? false,
       editedAt: map['editedAt'] is Timestamp

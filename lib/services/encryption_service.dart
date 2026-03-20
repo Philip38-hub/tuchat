@@ -67,6 +67,7 @@ class EncryptionService extends BaseService {
 
   Future<EncryptedMessagePayload> encryptMessage({
     required String plainText,
+    required String senderPublicKey,
     required String recipientPublicKey,
   }) async {
     try {
@@ -102,10 +103,15 @@ class EncryptionService extends BaseService {
         ),
       );
       final encryptedSymmetricKey = rsaEncrypter.encryptBytes(aesKeyBytes);
+      final senderEncryptedSymmetricKey = _encryptSymmetricKey(
+        aesKeyBytes: aesKeyBytes,
+        publicKeyPem: senderPublicKey,
+      );
 
       return EncryptedMessagePayload(
         encryptedMessage: encryptedBody.base64,
-        encryptedSymmetricKey: encryptedSymmetricKey.base64,
+        recipientEncryptedSymmetricKey: encryptedSymmetricKey.base64,
+        senderEncryptedSymmetricKey: senderEncryptedSymmetricKey.base64,
         initializationVector: base64Encode(ivBytes),
       );
     } catch (e) {
@@ -116,6 +122,7 @@ class EncryptionService extends BaseService {
 
   Future<String> decryptMessage({
     required String uid,
+    required bool useSenderKey,
     required EncryptedMessagePayload payload,
   }) async {
     try {
@@ -135,8 +142,12 @@ class EncryptionService extends BaseService {
         ),
       );
 
+      final encryptedKey = useSenderKey && payload.senderEncryptedSymmetricKey != null
+          ? payload.senderEncryptedSymmetricKey!
+          : payload.recipientEncryptedSymmetricKey;
+
       final aesKey = rsaEncrypter.decryptBytes(
-        encrypt.Encrypted.fromBase64(payload.encryptedSymmetricKey),
+        encrypt.Encrypted.fromBase64(encryptedKey),
       );
 
       final aesEncrypter = encrypt.Encrypter(
@@ -152,6 +163,104 @@ class EncryptionService extends BaseService {
       );
     } catch (e) {
       logError('Failed to decrypt message: $e');
+      throw handleException(e);
+    }
+  }
+
+  Future<EncryptedMessagePayload> encryptBinary({
+    required Uint8List bytes,
+    required String senderPublicKey,
+    required String recipientPublicKey,
+  }) async {
+    try {
+      if (bytes.isEmpty) {
+        throw 'Media file is empty.';
+      }
+
+      if (!isValidPublicKey(senderPublicKey) ||
+          !isValidPublicKey(recipientPublicKey)) {
+        throw 'Encryption keys are invalid.';
+      }
+
+      final random = Random.secure();
+      final aesKeyBytes = _randomBytes(random, 32);
+      final ivBytes = _randomBytes(random, 16);
+
+      final aesEncrypter = encrypt.Encrypter(
+        encrypt.AES(
+          encrypt.Key(Uint8List.fromList(aesKeyBytes)),
+          mode: encrypt.AESMode.cbc,
+        ),
+      );
+      final encryptedBody = aesEncrypter.encryptBytes(
+        bytes,
+        iv: encrypt.IV(Uint8List.fromList(ivBytes)),
+      );
+
+      return EncryptedMessagePayload(
+        encryptedMessage: encryptedBody.base64,
+        recipientEncryptedSymmetricKey:
+            _encryptSymmetricKey(
+              aesKeyBytes: aesKeyBytes,
+              publicKeyPem: recipientPublicKey,
+            ).base64,
+        senderEncryptedSymmetricKey:
+            _encryptSymmetricKey(
+              aesKeyBytes: aesKeyBytes,
+              publicKeyPem: senderPublicKey,
+            ).base64,
+        initializationVector: base64Encode(ivBytes),
+      );
+    } catch (e) {
+      logError('Failed to encrypt media bytes: $e');
+      throw handleException(e);
+    }
+  }
+
+  Future<Uint8List> decryptBinary({
+    required String uid,
+    required bool useSenderKey,
+    required EncryptedMessagePayload payload,
+  }) async {
+    try {
+      final privateKeyPem = await _secureStorage.read(
+        key: _privateKeyStorageKey(uid),
+      );
+      if (privateKeyPem == null || privateKeyPem.isEmpty) {
+        throw 'Private key not found on this device.';
+      }
+
+      final privateKey =
+          encrypt.RSAKeyParser().parse(privateKeyPem) as RSAPrivateKey;
+      final rsaEncrypter = encrypt.Encrypter(
+        encrypt.RSA(
+          privateKey: privateKey,
+          encoding: encrypt.RSAEncoding.PKCS1,
+        ),
+      );
+
+      final encryptedKey = useSenderKey && payload.senderEncryptedSymmetricKey != null
+          ? payload.senderEncryptedSymmetricKey!
+          : payload.recipientEncryptedSymmetricKey;
+
+      final aesKey = rsaEncrypter.decryptBytes(
+        encrypt.Encrypted.fromBase64(encryptedKey),
+      );
+      final aesEncrypter = encrypt.Encrypter(
+        encrypt.AES(
+          encrypt.Key(Uint8List.fromList(aesKey)),
+          mode: encrypt.AESMode.cbc,
+        ),
+      );
+
+      return Uint8List.fromList(
+        aesEncrypter.decryptBytes(
+          encrypt.Encrypted.fromBase64(payload.encryptedMessage),
+          iv: encrypt.IV.fromBase64(payload.initializationVector),
+        ),
+      );
+    } catch (e) {
+      logError('Failed to decrypt media bytes: $e');
       throw handleException(e);
     }
   }
@@ -213,6 +322,20 @@ class EncryptionService extends BaseService {
 
   List<int> _randomBytes(Random random, int length) {
     return List<int>.generate(length, (_) => random.nextInt(256));
+  }
+
+  encrypt.Encrypted _encryptSymmetricKey({
+    required List<int> aesKeyBytes,
+    required String publicKeyPem,
+  }) {
+    final publicKey = encrypt.RSAKeyParser().parse(publicKeyPem) as RSAPublicKey;
+    final rsaEncrypter = encrypt.Encrypter(
+      encrypt.RSA(
+        publicKey: publicKey,
+        encoding: encrypt.RSAEncoding.PKCS1,
+      ),
+    );
+    return rsaEncrypter.encryptBytes(aesKeyBytes);
   }
 
   String _encodePublicKeyToPem(RSAPublicKey publicKey) {

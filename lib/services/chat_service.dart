@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:tuchat/models/chat.dart';
@@ -7,13 +9,18 @@ import 'package:tuchat/models/message.dart';
 import 'package:tuchat/models/user.dart';
 import 'package:tuchat/services/base_service.dart';
 import 'package:tuchat/services/encryption_service.dart';
+import 'package:tuchat/services/supabase_storage_service.dart';
 
 class ChatService extends BaseService {
-  ChatService({EncryptionService? encryptionService})
-    : _encryptionService = encryptionService ?? EncryptionService();
+  ChatService({
+    EncryptionService? encryptionService,
+    SupabaseStorageService? storageService,
+  }) : _encryptionService = encryptionService ?? EncryptionService(),
+       _storageService = storageService ?? SupabaseStorageService();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final EncryptionService _encryptionService;
+  final SupabaseStorageService _storageService;
 
   Future<List<AppUser>> searchUsersByUsername(
     String query, {
@@ -216,22 +223,29 @@ class ChatService extends BaseService {
 
       String plainContent = trimmed;
       String? encryptedContent;
-      String? encryptedSymmetricKey;
+      String? recipientEncryptedSymmetricKey;
+      String? senderEncryptedSymmetricKey;
       String? initializationVector;
 
       if (chat.isSecretChat) {
+        final sender = await getUserByUid(senderId);
         final recipient = await getUserByUid(receiverId);
-        if (recipient == null || recipient.publicKey.isEmpty) {
+        if (sender == null ||
+            sender.publicKey.isEmpty ||
+            recipient == null ||
+            recipient.publicKey.isEmpty) {
           throw 'Recipient encryption key is missing.';
         }
 
         final payload = await _encryptionService.encryptMessage(
           plainText: trimmed,
+          senderPublicKey: sender.publicKey,
           recipientPublicKey: recipient.publicKey,
         );
         plainContent = '';
         encryptedContent = payload.encryptedMessage;
-        encryptedSymmetricKey = payload.encryptedSymmetricKey;
+        recipientEncryptedSymmetricKey = payload.recipientEncryptedSymmetricKey;
+        senderEncryptedSymmetricKey = payload.senderEncryptedSymmetricKey;
         initializationVector = payload.initializationVector;
       }
 
@@ -242,13 +256,17 @@ class ChatService extends BaseService {
         'receiverId': receiverId,
         'content': plainContent,
         'encryptedContent': encryptedContent,
-        'encryptedSymmetricKey': encryptedSymmetricKey,
+        'encryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
         'initializationVector': initializationVector,
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
         'readAt': null,
         'type': MessageType.text.name,
         'mediaUrl': null,
+        'storagePath': null,
+        'mimeType': null,
         'fileName': null,
         'isEdited': false,
         'editedAt': null,
@@ -301,29 +319,38 @@ class ChatService extends BaseService {
     try {
       String plainContent = trimmed;
       String? encryptedContent;
-      String? encryptedSymmetricKey;
+      String? recipientEncryptedSymmetricKey;
+      String? senderEncryptedSymmetricKey;
       String? initializationVector;
 
       if (chat.isSecretChat) {
+        final sender = await getUserByUid(editorId);
         final recipient = await getUserByUid(receiverId);
-        if (recipient == null || recipient.publicKey.isEmpty) {
+        if (sender == null ||
+            sender.publicKey.isEmpty ||
+            recipient == null ||
+            recipient.publicKey.isEmpty) {
           throw 'Recipient encryption key is missing.';
         }
 
         final payload = await _encryptionService.encryptMessage(
           plainText: trimmed,
+          senderPublicKey: sender.publicKey,
           recipientPublicKey: recipient.publicKey,
         );
         plainContent = '';
         encryptedContent = payload.encryptedMessage;
-        encryptedSymmetricKey = payload.encryptedSymmetricKey;
+        recipientEncryptedSymmetricKey = payload.recipientEncryptedSymmetricKey;
+        senderEncryptedSymmetricKey = payload.senderEncryptedSymmetricKey;
         initializationVector = payload.initializationVector;
       }
 
       await messageRef.update({
         'content': plainContent,
         'encryptedContent': encryptedContent,
-        'encryptedSymmetricKey': encryptedSymmetricKey,
+        'encryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
         'initializationVector': initializationVector,
         'isEdited': true,
         'editedAt': FieldValue.serverTimestamp(),
@@ -361,8 +388,12 @@ class ChatService extends BaseService {
       'content': '',
       'encryptedContent': null,
       'encryptedSymmetricKey': null,
+      'recipientEncryptedSymmetricKey': null,
+      'senderEncryptedSymmetricKey': null,
       'initializationVector': null,
       'mediaUrl': null,
+      'storagePath': null,
+      'mimeType': null,
       'fileName': null,
       'isDeleted': true,
       'deletedAt': FieldValue.serverTimestamp(),
@@ -428,11 +459,101 @@ class ChatService extends BaseService {
   }
 
   Future<void> sendMediaMessage({
-    required String chatId,
+    required Chat chat,
     required String senderId,
     required String receiverId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    required MessageType type,
   }) async {
-    throw 'Media uploads are not configured yet. We need a storage provider before image/video sending can go live.';
+    if (type != MessageType.image && type != MessageType.video) {
+      throw 'Only image and video uploads are supported right now.';
+    }
+
+    try {
+      final messageRef = _firestore
+          .collection('chats')
+          .doc(chat.id)
+          .collection('messages')
+          .doc();
+      final fileExtension = _fileExtension(fileName, mimeType);
+      final storagePath =
+          '${chat.id}/${DateTime.now().millisecondsSinceEpoch}_${messageRef.id}$fileExtension';
+
+      var uploadBytes = bytes;
+      String? encryptedContent;
+      String? recipientEncryptedSymmetricKey;
+      String? senderEncryptedSymmetricKey;
+      String? initializationVector;
+
+      if (chat.isSecretChat) {
+        final sender = await getUserByUid(senderId);
+        final recipient = await getUserByUid(receiverId);
+        if (sender == null ||
+            sender.publicKey.isEmpty ||
+            recipient == null ||
+            recipient.publicKey.isEmpty) {
+          throw 'Encryption keys are missing for this secret chat.';
+        }
+
+        final payload = await _encryptionService.encryptBinary(
+          bytes: bytes,
+          senderPublicKey: sender.publicKey,
+          recipientPublicKey: recipient.publicKey,
+        );
+        uploadBytes = Uint8List.fromList(base64Decode(payload.encryptedMessage));
+        encryptedContent = payload.encryptedMessage;
+        recipientEncryptedSymmetricKey = payload.recipientEncryptedSymmetricKey;
+        senderEncryptedSymmetricKey = payload.senderEncryptedSymmetricKey;
+        initializationVector = payload.initializationVector;
+      }
+
+      final upload = await _storageService.uploadBytes(
+        bytes: uploadBytes,
+        path: storagePath,
+        mimeType: chat.isSecretChat ? 'application/octet-stream' : mimeType,
+      );
+
+      await messageRef.set({
+        'id': messageRef.id,
+        'chatId': chat.id,
+        'senderId': senderId,
+        'receiverId': receiverId,
+        'content': '',
+        'encryptedContent': encryptedContent,
+        'encryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
+        'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
+        'initializationVector': initializationVector,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'readAt': null,
+        'type': type.name,
+        'mediaUrl': upload.publicUrl,
+        'storagePath': upload.path,
+        'mimeType': mimeType,
+        'fileName': fileName,
+        'isEdited': false,
+        'editedAt': null,
+        'isDeleted': false,
+        'deletedAt': null,
+        'isSecret': chat.isSecretChat,
+      });
+
+      await _updateChatAfterMessage(
+        chat: chat,
+        senderId: senderId,
+        receiverId: receiverId,
+        preview: type == MessageType.image ? 'Image' : 'Video',
+        previewType: type == MessageType.image
+            ? MessagePreviewType.image
+            : MessagePreviewType.video,
+      );
+    } catch (e) {
+      logError('Failed to send media message: $e');
+      throw handleException(e);
+    }
   }
 
   String buildDirectChatId(
@@ -557,7 +678,7 @@ class ChatService extends BaseService {
     }
 
     final encryptedContent = message.encryptedContent;
-    final encryptedSymmetricKey = message.encryptedSymmetricKey;
+    final encryptedSymmetricKey = message.recipientEncryptedSymmetricKey;
     final initializationVector = message.initializationVector;
 
     if (encryptedContent == null ||
@@ -568,11 +689,69 @@ class ChatService extends BaseService {
 
     return _encryptionService.decryptMessage(
       uid: uid,
+      useSenderKey: uid == message.senderId,
       payload: EncryptedMessagePayload(
         encryptedMessage: encryptedContent,
-        encryptedSymmetricKey: encryptedSymmetricKey,
+        recipientEncryptedSymmetricKey: encryptedSymmetricKey,
         initializationVector: initializationVector,
+        senderEncryptedSymmetricKey: message.senderEncryptedSymmetricKey,
       ),
     );
+  }
+
+  Future<Uint8List> downloadAndDecryptMedia({
+    required String uid,
+    required Message message,
+  }) async {
+    final storagePath = message.storagePath;
+    if (storagePath == null || storagePath.isEmpty) {
+      throw 'Media path is missing.';
+    }
+
+    final bytes = await _storageService.downloadBytes(storagePath);
+    if (!message.isSecret) {
+      return bytes;
+    }
+
+    final encryptedContent = message.encryptedContent;
+    final recipientKey = message.recipientEncryptedSymmetricKey;
+    final initializationVector = message.initializationVector;
+    if (encryptedContent == null ||
+        recipientKey == null ||
+        initializationVector == null) {
+      throw 'Encrypted media metadata is incomplete.';
+    }
+
+    return _encryptionService.decryptBinary(
+      uid: uid,
+      useSenderKey: uid == message.senderId,
+      payload: EncryptedMessagePayload(
+        encryptedMessage: encryptedContent,
+        recipientEncryptedSymmetricKey: recipientKey,
+        initializationVector: initializationVector,
+        senderEncryptedSymmetricKey: message.senderEncryptedSymmetricKey,
+      ),
+    );
+  }
+
+  String _fileExtension(String fileName, String mimeType) {
+    final normalizedName = fileName.toLowerCase();
+    if (normalizedName.contains('.')) {
+      return '.${normalizedName.split('.').last}';
+    }
+
+    if (mimeType.contains('png')) {
+      return '.png';
+    }
+    if (mimeType.contains('jpeg') || mimeType.contains('jpg')) {
+      return '.jpg';
+    }
+    if (mimeType.contains('mp4')) {
+      return '.mp4';
+    }
+    if (mimeType.contains('mov')) {
+      return '.mov';
+    }
+    return '';
   }
 }

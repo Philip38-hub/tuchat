@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:tuchat/models/chat.dart';
+import 'package:tuchat/models/message.dart';
 import 'package:tuchat/services/chat_service.dart';
 
 class ChatSessionProvider extends ChangeNotifier {
@@ -25,6 +27,7 @@ class ChatSessionProvider extends ChangeNotifier {
   Timer? _typingDebounce;
   bool _disposed = false;
   bool _isTyping = false;
+  final ImagePicker _imagePicker = ImagePicker();
 
   Chat get chat => _chat;
   bool get isBusy => _isBusy;
@@ -79,12 +82,23 @@ class ChatSessionProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> pickAndSendMedia() async {
+  Future<void> pickAndSendMedia(MessageType type) async {
+    final file = await _pickMedia(type);
+    if (file == null) {
+      return;
+    }
+
+    final bytes = await file.readAsBytes();
+    final mimeType = _mimeTypeFor(type, file.name);
     await _run(() {
       return _chatService.sendMediaMessage(
-        chatId: _chat.id,
+        chat: _chat,
         senderId: _currentUserId,
         receiverId: _otherUserId,
+        bytes: bytes,
+        fileName: file.name,
+        mimeType: mimeType,
+        type: type,
       );
     });
   }
@@ -152,5 +166,34 @@ class ChatSessionProvider extends ChangeNotifier {
     _typingDebounce?.cancel();
     unawaited(setTyping(false));
     super.dispose();
+  }
+
+  Future<XFile?> _pickMedia(MessageType type) {
+    if (type == MessageType.video) {
+      return _imagePicker.pickVideo(source: ImageSource.gallery);
+    }
+
+    return _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+  }
+
+  String _mimeTypeFor(MessageType type, String fileName) {
+    final normalized = fileName.toLowerCase();
+    if (type == MessageType.video) {
+      if (normalized.endsWith('.mov')) {
+        return 'video/quicktime';
+      }
+      return 'video/mp4';
+    }
+
+    if (normalized.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (normalized.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    return 'image/jpeg';
   }
 }

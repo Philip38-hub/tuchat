@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:tuchat/models/chat.dart';
 import 'package:tuchat/models/message.dart';
@@ -163,6 +166,48 @@ class _ChatScreenViewState extends State<_ChatScreenView> {
     );
   }
 
+  Future<void> _pickMediaAndSend() async {
+    final provider = context.read<ChatSessionProvider>();
+    final selectedType = await showModalBottomSheet<MessageType>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('Send image'),
+                onTap: () => Navigator.of(context).pop(MessageType.image),
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined),
+                title: const Text('Send video'),
+                onTap: () => Navigator.of(context).pop(MessageType.video),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedType == null || !mounted) {
+      return;
+    }
+
+    try {
+      await provider.pickAndSendMedia(selectedType);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatService = context.read<ChatService>();
@@ -271,19 +316,7 @@ class _ChatScreenViewState extends State<_ChatScreenView> {
                               IconButton(
                                 onPressed: provider.isBusy
                                     ? null
-                                    : () async {
-                                        try {
-                                          await provider.pickAndSendMedia();
-                                        } catch (error) {
-                                          if (!context.mounted) {
-                                            return;
-                                          }
-
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text(error.toString())),
-                                          );
-                                        }
-                                      },
+                                    : _pickMediaAndSend,
                                 icon: const Icon(Icons.attach_file),
                                 tooltip: 'Attach media',
                               ),
@@ -475,6 +508,14 @@ class _MessageBody extends StatelessWidget {
       );
     }
 
+    if (message.type == MessageType.image && message.isSecret) {
+      return _SecretImageMessage(
+        message: message,
+        currentUserId: currentUserId,
+        chatService: chatService,
+      );
+    }
+
     if (message.type == MessageType.image && message.mediaUrl?.isNotEmpty == true) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
@@ -488,6 +529,14 @@ class _MessageBody extends StatelessWidget {
             child: Text('Unable to load image.'),
           ),
         ),
+      );
+    }
+
+    if (message.type == MessageType.video && message.isSecret) {
+      return _SecretVideoMessagePlayer(
+        message: message,
+        currentUserId: currentUserId,
+        chatService: chatService,
       );
     }
 
@@ -583,6 +632,154 @@ class _VideoMessagePlayerState extends State<_VideoMessagePlayer> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SecretImageMessage extends StatelessWidget {
+  const _SecretImageMessage({
+    required this.message,
+    required this.currentUserId,
+    required this.chatService,
+  });
+
+  final Message message;
+  final String currentUserId;
+  final ChatService chatService;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List>(
+      future: chatService.downloadAndDecryptMedia(
+        uid: currentUserId,
+        message: message,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError || snapshot.data == null) {
+          return const Text('Unable to decrypt image on this device.');
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(snapshot.data!, fit: BoxFit.cover),
+        );
+      },
+    );
+  }
+}
+
+class _SecretVideoMessagePlayer extends StatefulWidget {
+  const _SecretVideoMessagePlayer({
+    required this.message,
+    required this.currentUserId,
+    required this.chatService,
+  });
+
+  final Message message;
+  final String currentUserId;
+  final ChatService chatService;
+
+  @override
+  State<_SecretVideoMessagePlayer> createState() =>
+      _SecretVideoMessagePlayerState();
+}
+
+class _SecretVideoMessagePlayerState extends State<_SecretVideoMessagePlayer> {
+  VideoPlayerController? _controller;
+  Future<void>? _loadFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFuture = _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final bytes = await widget.chatService.downloadAndDecryptMedia(
+      uid: widget.currentUserId,
+      message: widget.message,
+    );
+    final directory = await getTemporaryDirectory();
+    final extension = widget.message.fileName?.contains('.') == true
+        ? '.${widget.message.fileName!.split('.').last}'
+        : '.mp4';
+    final file = File('${directory.path}/${widget.message.id}$extension');
+    await file.writeAsBytes(bytes, flush: true);
+
+    final controller = VideoPlayerController.file(file);
+    await controller.initialize();
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    setState(() {
+      _controller = controller;
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+
+    return FutureBuilder<void>(
+      future: _loadFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done ||
+            controller == null ||
+            !controller.value.isInitialized) {
+          if (snapshot.hasError) {
+            return const Text('Unable to decrypt video on this device.');
+          }
+
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: controller.value.aspectRatio,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: VideoPlayer(controller),
+              ),
+            ),
+            const SizedBox(height: 8),
+            IconButton(
+              onPressed: () {
+                if (controller.value.isPlaying) {
+                  controller.pause();
+                } else {
+                  controller.play();
+                }
+                setState(() {});
+              },
+              icon: Icon(
+                controller.value.isPlaying
+                    ? Icons.pause_circle
+                    : Icons.play_circle,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
