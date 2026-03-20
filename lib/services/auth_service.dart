@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
@@ -16,7 +15,6 @@ import 'base_service.dart';
 class AuthService extends BaseService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
 
@@ -229,8 +227,7 @@ class AuthService extends BaseService {
 
       final existingUser = await _getUserProfile(firebaseUser.uid);
       final profilePicUrl = profileImageBytes != null
-          ? await _uploadProfilePicture(
-              uid: firebaseUser.uid,
+          ? _encodeProfilePicture(
               bytes: profileImageBytes,
               fileName: profileImageName,
             )
@@ -306,15 +303,16 @@ class AuthService extends BaseService {
     return AppUser.fromMap(data, uid);
   }
 
-  Future<String> _uploadProfilePicture({
-    required String uid,
-    required Uint8List bytes,
-    String? fileName,
-  }) async {
+  String _encodeProfilePicture({required Uint8List bytes, String? fileName}) {
+    const maxInlineImageBytes = 350 * 1024;
+    if (bytes.length > maxInlineImageBytes) {
+      throw 'Selected image is too large. Please choose a smaller photo.';
+    }
+
     final extension = _extractFileExtension(fileName);
-    final ref = _storage.ref().child('profile_pictures/$uid/avatar.$extension');
-    await ref.putData(bytes, SettableMetadata(contentType: 'image/$extension'));
-    return ref.getDownloadURL();
+    final mimeType = _contentTypeForExtension(extension);
+    final encoded = base64Encode(bytes);
+    return 'data:$mimeType;base64,$encoded';
   }
 
   String _extractFileExtension(String? fileName) {
@@ -327,6 +325,19 @@ class AuthService extends BaseService {
       return extension;
     }
     return 'jpg';
+  }
+
+  String _contentTypeForExtension(String extension) {
+    switch (extension) {
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
+    }
   }
 
   String _generatePublicKey() {
