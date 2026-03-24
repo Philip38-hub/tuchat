@@ -114,6 +114,61 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _removeContact(AppUser contact) async {
+    final currentUser = context.read<AuthProvider>().currentUser;
+    if (currentUser == null) {
+      return;
+    }
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete contact'),
+          content: Text(
+            'Remove ${contact.username} from your contacts? This will not delete existing chat messages.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
+
+    try {
+      await context.read<ChatService>().removeContact(
+        ownerUid: currentUser.uid,
+        contactUid: contact.uid,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${contact.username} removed from contacts.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   Future<void> _openChat(
     AppUser otherUser, {
     bool isSecretChat = false,
@@ -238,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _ContactsTab(
                 currentUser: user,
                 onOpenChat: _openChat,
+                onDeleteContact: _removeContact,
               ),
               _ConnectTab(
                 currentUser: user,
@@ -299,10 +355,12 @@ class _ContactsTab extends StatelessWidget {
   const _ContactsTab({
     required this.currentUser,
     required this.onOpenChat,
+    required this.onDeleteContact,
   });
 
   final AppUser currentUser;
   final Future<void> Function(AppUser otherUser, {bool isSecretChat}) onOpenChat;
+  final Future<void> Function(AppUser contact) onDeleteContact;
 
   @override
   Widget build(BuildContext context) {
@@ -338,6 +396,8 @@ class _ContactsTab extends StatelessWidget {
                   onOpenChat(contact);
                 } else if (value == 'secret') {
                   onOpenChat(contact, isSecretChat: true);
+                } else if (value == 'delete') {
+                  onDeleteContact(contact);
                 }
               },
               itemBuilder: (context) => const [
@@ -348,6 +408,10 @@ class _ContactsTab extends StatelessWidget {
                 PopupMenuItem(
                   value: 'secret',
                   child: Text('Open secret chat'),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete contact'),
                 ),
               ],
             ),

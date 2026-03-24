@@ -98,17 +98,47 @@ class ChatService extends BaseService {
 
       batch.set(ownerContactRef, {
         'uid': contactUid,
-        'addedAt': FieldValue.serverTimestamp(),
+        'addedAt': _nowTimestamp(),
       });
       batch.set(reverseContactRef, {
         'uid': ownerUid,
-        'addedAt': FieldValue.serverTimestamp(),
+        'addedAt': _nowTimestamp(),
       });
 
       await batch.commit();
     } catch (e) {
       logError('Failed to add contact: $e');
       rethrow;
+    }
+  }
+
+  Future<void> removeContact({
+    required String ownerUid,
+    required String contactUid,
+  }) async {
+    if (ownerUid == contactUid) {
+      throw 'You cannot remove yourself as a contact.';
+    }
+
+    try {
+      final batch = _firestore.batch();
+      final ownerContactRef = _firestore
+          .collection('users')
+          .doc(ownerUid)
+          .collection('contacts')
+          .doc(contactUid);
+      final reverseContactRef = _firestore
+          .collection('users')
+          .doc(contactUid)
+          .collection('contacts')
+          .doc(ownerUid);
+
+      batch.delete(ownerContactRef);
+      batch.delete(reverseContactRef);
+      await batch.commit();
+    } catch (e) {
+      logError('Failed to remove contact: $e');
+      throw handleException(e);
     }
   }
 
@@ -136,11 +166,16 @@ class ChatService extends BaseService {
     return _firestore
         .collection('chats')
         .where('participants', arrayContains: uid)
-        .orderBy('lastMessageTime', descending: true)
+        .orderBy('updatedAt', descending: true)
         .snapshots()
         .map(
           (snapshot) => snapshot.docs
               .map((doc) => Chat.fromMap(doc.data(), doc.id))
+              .where(
+                (chat) =>
+                    chat.lastMessageTime != null ||
+                    (chat.lastMessage?.trim().isNotEmpty == true),
+              )
               .toList(),
         );
   }
@@ -188,13 +223,6 @@ class ChatService extends BaseService {
       otherUserId,
       isSecretChat: isSecretChat,
     );
-    final chatRef = _firestore.collection('chats').doc(chatId);
-
-    await chatRef.set({
-      'participants': _sortedParticipants(currentUserId, otherUserId),
-      'isSecretChat': isSecretChat,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
 
     return Chat(
       id: chatId,
@@ -215,11 +243,18 @@ class ChatService extends BaseService {
     }
 
     try {
+      await _ensureChatDocument(
+        chat: chat,
+        currentUserId: senderId,
+        otherUserId: receiverId,
+      );
+
       final messageRef = _firestore
           .collection('chats')
           .doc(chat.id)
           .collection('messages')
           .doc();
+      final now = _nowTimestamp();
 
       String plainContent = trimmed;
       String? encryptedContent;
@@ -260,7 +295,7 @@ class ChatService extends BaseService {
         'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
         'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
         'initializationVector': initializationVector,
-        'timestamp': FieldValue.serverTimestamp(),
+        'timestamp': now,
         'isRead': false,
         'readAt': null,
         'type': MessageType.text.name,
@@ -432,7 +467,6 @@ class ChatService extends BaseService {
       }
       batch.set(_firestore.collection('chats').doc(chatId), {
         'unreadCounts': {viewerId: 0},
-        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
       await batch.commit();
@@ -450,7 +484,6 @@ class ChatService extends BaseService {
     try {
       await _firestore.collection('chats').doc(chatId).set({
         'typingUsers': {userId: isTyping},
-        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
       logError('Failed to update typing status: $e');
@@ -472,11 +505,18 @@ class ChatService extends BaseService {
     }
 
     try {
+      await _ensureChatDocument(
+        chat: chat,
+        currentUserId: senderId,
+        otherUserId: receiverId,
+      );
+
       final messageRef = _firestore
           .collection('chats')
           .doc(chat.id)
           .collection('messages')
           .doc();
+      final now = _nowTimestamp();
       final fileExtension = _fileExtension(fileName, mimeType);
       final storagePath =
           '${chat.id}/${DateTime.now().millisecondsSinceEpoch}_${messageRef.id}$fileExtension';
@@ -526,7 +566,7 @@ class ChatService extends BaseService {
         'recipientEncryptedSymmetricKey': recipientEncryptedSymmetricKey,
         'senderEncryptedSymmetricKey': senderEncryptedSymmetricKey,
         'initializationVector': initializationVector,
-        'timestamp': FieldValue.serverTimestamp(),
+        'timestamp': now,
         'isRead': false,
         'readAt': null,
         'type': type.name,
@@ -571,6 +611,32 @@ class ChatService extends BaseService {
     return participants;
   }
 
+  Future<void> _ensureChatDocument({
+    required Chat chat,
+    required String currentUserId,
+    required String otherUserId,
+  }) {
+    final now = _nowTimestamp();
+    return _firestore.collection('chats').doc(chat.id).set({
+      'participants': _sortedParticipants(currentUserId, otherUserId),
+      'isSecretChat': chat.isSecretChat,
+      'lastMessage': null,
+      'lastMessageTime': null,
+      'lastSenderId': null,
+      'lastMessageType': MessagePreviewType.text.name,
+      'unreadCounts': {
+        currentUserId: 0,
+        otherUserId: 0,
+      },
+      'typingUsers': {
+        currentUserId: false,
+        otherUserId: false,
+      },
+      'createdAt': now,
+      'updatedAt': now,
+    }, SetOptions(merge: true));
+  }
+
   Future<void> _updateChatAfterMessage({
     required Chat chat,
     required String senderId,
@@ -580,10 +646,11 @@ class ChatService extends BaseService {
   }) async {
     final senderUnread = chat.unreadCountFor(senderId);
     final receiverUnread = chat.unreadCountFor(receiverId);
+    final now = _nowTimestamp();
 
     await _firestore.collection('chats').doc(chat.id).set({
       'lastMessage': preview,
-      'lastMessageTime': FieldValue.serverTimestamp(),
+      'lastMessageTime': now,
       'lastSenderId': senderId,
       'lastMessageType': previewType.name,
       'typingUsers': {senderId: false},
@@ -591,7 +658,7 @@ class ChatService extends BaseService {
         senderId: senderUnread,
         receiverId: receiverUnread + 1,
       },
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': now,
     }, SetOptions(merge: true));
   }
 
@@ -610,7 +677,7 @@ class ChatService extends BaseService {
         'lastMessageTime': null,
         'lastSenderId': null,
         'lastMessageType': MessagePreviewType.text.name,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': _nowTimestamp(),
       }, SetOptions(merge: true));
       return;
     }
@@ -624,7 +691,7 @@ class ChatService extends BaseService {
       'lastMessageTime': latestSnapshot.docs.first.data()['timestamp'],
       'lastSenderId': latestMessage.senderId,
       'lastMessageType': _previewTypeForMessage(latestMessage).name,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': latestSnapshot.docs.first.data()['timestamp'],
     }, SetOptions(merge: true));
   }
 
@@ -754,4 +821,6 @@ class ChatService extends BaseService {
     }
     return '';
   }
+
+  Timestamp _nowTimestamp() => Timestamp.fromDate(DateTime.now());
 }
